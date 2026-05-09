@@ -7,6 +7,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 from langchain_groq import ChatGroq
+from companydata import company_topics
 
 from langchain.prompts import PromptTemplate
 
@@ -59,7 +60,6 @@ def process_pdf(uploaded_file):
 def create_chain(vectorstore):
 
     api_key = os.getenv("GROQ_API_KEY")
-    print("API KEY:", api_key)
 
     llm = ChatGroq(
         groq_api_key=api_key,
@@ -68,50 +68,44 @@ def create_chain(vectorstore):
 
     memory = ConversationBufferMemory(
         memory_key="chat_history",
-        return_messages=True
-    )
-
-    qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectorstore.as_retriever(),
-    memory=memory,
-    combine_docs_chain_kwargs={"prompt": PROMPT}
+        return_messages=True,
+        input_key="question"
     )
 
     prompt_template = """
-    You are an AI interview trainer.
+    You are a strict AI placement interview trainer.
+
+    You MUST follow the relevancy rules before answering.
 
     STRICT RULES:
-    1. Use ONLY the uploaded PDF context.If the answer is not present in the PDF, say:
-    "The uploaded PDF does not contain information about this."and then answer his question with your knowledge.
-    2.If the user says:
-      - stop
-      - end
-      - quit
-      - exit
-      - stop asking questions
-      then stop asking interview questions politely and do not ask another question unless the user ask.
-    3.if user choose the target company as other then answer the question without considering relevency rule.
+    1. Use ONLY the uploaded PDF context.
+    If the answer is not present in the PDF, say:
+    "The uploaded PDF does not contain information about this."
+    and then answer using your own knowledge.
+
+    2. If the user says:
+    - stop
+    - end
+    - quit
+    - exit
+    - stop asking questions
+
+    then stop asking the questions politely.
+
+    3. If user chooses OTHER company,
+    ignore relevancy rule.
 
     RELEVANCY RULE:
-        - Check whether the user's question belongs to the important topics of the selected company.
-        - If the question is outside the company's important topics, first say:
-        "This topic is irrelevant to the important topics of {company}."
-        - Then still answer the question.
+    - Important topics for {company} are:
+      {topics}
+    - Check whether the question belongs to important topics of {company}.
+    - If irrelevant, first say:
+      "This topic is irrelevant to the important topics of {company}."
+    - Then still answer.
 
     INTERVIEW FLOW:
-    - Ask one interview question at a time.
+    - Ask one question at a time.
     - Evaluate user's answer.
-
-    Evaluation format:
-    1. Verdict:
-    Correct / Partially Correct / Incorrect
-
-    2. Explanation
-
-    3. Ideal Answer
-
-    4. Ask next interview question from the PDF.
 
     Context:
     {context}
@@ -121,15 +115,17 @@ def create_chain(vectorstore):
 
     AI:
     """
+
     PROMPT = PromptTemplate(
-    template=prompt_template,
-    input_variables=["context", "question"]
+        template=prompt_template,
+        input_variables=["context", "question", "company","topics"]
     )
 
     qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectorstore.as_retriever(),
-    combine_docs_chain_kwargs={"prompt": PROMPT}
+        llm=llm,
+        retriever=vectorstore.as_retriever(),
+        memory=memory,
+        combine_docs_chain_kwargs={"prompt": PROMPT}
     )
 
     return qa_chain

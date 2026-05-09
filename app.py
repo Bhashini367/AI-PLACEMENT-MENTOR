@@ -39,9 +39,22 @@ if user_question:
 
     else:
 
-        response = st.session_state.qa_chain.invoke(
-            {"question": user_question}
+        relevant = any(
+            topic.lower() in user_question.lower()
+            for topic in company_topics[selected_company]
         )
 
+        if not relevant:
+             st.warning(
+            f"This topic may be irrelevant to {selected_company} interview topics."
+            )
+
+        response = st.session_state.qa_chain.invoke(
+        {
+            "question": user_question,
+            "company": selected_company,
+            "topics": ", ".join(company_topics[selected_company])
+        }
+        )
         st.write("### Answer")
         st.write(response["answer"])
