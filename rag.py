@@ -1,5 +1,6 @@
 import os
 import tempfile
+import streamlit as st
 
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -7,27 +8,37 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 from langchain_groq import ChatGroq
-from companydata import company_topics
 
 from langchain.prompts import PromptTemplate
-
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
-# Load API key from .env
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env")
 
-def process_pdf(uploaded_file):
+def process_pdfs(uploaded_files):
 
-    # Save uploaded PDF temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-        temp_file.write(uploaded_file.read())
-        temp_pdf_path = temp_file.name
+    all_documents = []
 
-    # Load PDF
-    loader = PDFPlumberLoader(temp_pdf_path)
-    documents = loader.load()
+    # Process all uploaded PDFs
+    for uploaded_file in uploaded_files:
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            temp_file.write(uploaded_file.read())
+            temp_pdf_path = temp_file.name
+
+        # Load PDF
+        loader = PDFPlumberLoader(temp_pdf_path)
+        documents = loader.load()
+
+        # Store original filename in metadata
+        for doc in documents:
+            doc.metadata["source"] = uploaded_file.name
+
+        all_documents.extend(documents)
+
+        # Remove temporary file
+        os.remove(temp_pdf_path)
 
     # Split text into chunks
     splitter = RecursiveCharacterTextSplitter(
@@ -35,13 +46,13 @@ def process_pdf(uploaded_file):
         chunk_overlap=200
     )
 
-    chunks = splitter.split_documents(documents)
+    chunks = splitter.split_documents(all_documents)
 
     print("TOTAL CHUNKS:", len(chunks))
 
     # Safety check
     if len(chunks) == 0:
-        raise ValueError("No text could be extracted from PDF")
+        raise ValueError("No text could be extracted from PDFs")
 
     # Embeddings
     embeddings = HuggingFaceEmbeddings(
@@ -51,14 +62,12 @@ def process_pdf(uploaded_file):
     # Create vector database
     vectorstore = FAISS.from_documents(chunks, embeddings)
 
-    # Delete temporary file
-    os.remove(temp_pdf_path)
-
     return vectorstore
 
 
 def create_chain(vectorstore):
 
+    # Streamlit Cloud secrets
     api_key = os.getenv("GROQ_API_KEY")
 
     llm = ChatGroq(
@@ -69,7 +78,8 @@ def create_chain(vectorstore):
     memory = ConversationBufferMemory(
         memory_key="chat_history",
         return_messages=True,
-        input_key="question"
+        input_key="question",
+        output_key="answer"
     )
 
     prompt_template = """
@@ -78,6 +88,7 @@ def create_chain(vectorstore):
     You MUST follow the relevancy rules before answering.
 
     STRICT RULES:
+
     1. Use ONLY the uploaded PDF context.
     If the answer is not present in the PDF, say:
     "The uploaded PDF does not contain information about this."
@@ -90,21 +101,26 @@ def create_chain(vectorstore):
     - exit
     - stop asking questions
 
-    then stop asking the questions politely.
+    then stop asking questions politely.
 
     3. If user chooses OTHER company,
     ignore relevancy rule.
 
     RELEVANCY RULE:
+
     - Important topics for {company} are:
       {topics}
-    - Check whether the question belongs to important topics of {company}.
+
+    - Check whether the user's question belongs to the important topics.
+
     - If irrelevant, first say:
       "This topic is irrelevant to the important topics of {company}."
-    - Then still answer.
+
+    - Then still answer the question.
 
     INTERVIEW FLOW:
-    - Ask one question at a time.
+
+    - Ask one interview question at a time.
     - Evaluate user's answer.
 
     Context:
@@ -118,14 +134,17 @@ def create_chain(vectorstore):
 
     PROMPT = PromptTemplate(
         template=prompt_template,
-        input_variables=["context", "question", "company","topics"]
+        input_variables=["context", "question", "company", "topics"]
     )
 
     qa_chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vectorstore.as_retriever(),
-        memory=memory,
-        combine_docs_chain_kwargs={"prompt": PROMPT}
+    llm=llm,
+    retriever=vectorstore.as_retriever(
+        search_kwargs={"k": 2}
+    ),
+    memory=memory,
+    combine_docs_chain_kwargs={"prompt": PROMPT},
+    return_source_documents=True
     )
 
     return qa_chain
