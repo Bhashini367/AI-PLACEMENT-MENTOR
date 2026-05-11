@@ -16,31 +16,72 @@ from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env")
 
+from langchain.schema import Document
+from pdf2image import convert_from_path
+import pytesseract
+
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+poppler_path = r"C:\poppler\Library\bin"
+
+
 def process_pdfs(uploaded_files):
 
     all_documents = []
 
-    # Process all uploaded PDFs
     for uploaded_file in uploaded_files:
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
             temp_file.write(uploaded_file.read())
             temp_pdf_path = temp_file.name
 
-        # Load PDF
+        # Normal PDF extraction
         loader = PDFPlumberLoader(temp_pdf_path)
         documents = loader.load()
 
-        # Store original filename in metadata
+        extracted_text = ""
+
+        for doc in documents:
+            extracted_text += doc.page_content.strip()
+
+        # If scanned PDF → OCR
+        if len(extracted_text) < 50:
+
+            print("Scanned PDF detected. Running OCR...")
+
+            images = convert_from_path(
+                temp_pdf_path,
+                dpi=150,
+                poppler_path=r"C:\Users\BHASHINI\Downloads\Release-26.02.0-0\poppler-26.02.0\Library\bin"
+            )
+
+            ocr_text = ""
+
+            for img in images:
+                img = img.convert("L")
+                text = pytesseract.image_to_string(
+                        img
+                        # config="--psm 6"
+                        )
+                ocr_text += text
+
+            documents = [
+                Document(
+                    page_content=ocr_text,
+                    metadata={"source": uploaded_file.name}
+                )
+            ]
+
+        # Store metadata
         for doc in documents:
             doc.metadata["source"] = uploaded_file.name
 
         all_documents.extend(documents)
 
-        # Remove temporary file
+        # Delete temp file
         os.remove(temp_pdf_path)
 
-    # Split text into chunks
+    # Split into chunks
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200
@@ -50,7 +91,6 @@ def process_pdfs(uploaded_files):
 
     print("TOTAL CHUNKS:", len(chunks))
 
-    # Safety check
     if len(chunks) == 0:
         raise ValueError("No text could be extracted from PDFs")
 
@@ -59,11 +99,10 @@ def process_pdfs(uploaded_files):
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    # Create vector database
+    # Vector DB
     vectorstore = FAISS.from_documents(chunks, embeddings)
 
     return vectorstore
-
 
 def create_chain(vectorstore):
 
