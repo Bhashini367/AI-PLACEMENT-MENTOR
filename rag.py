@@ -185,5 +185,4 @@ def create_chain(vectorstore):
     combine_docs_chain_kwargs={"prompt": PROMPT},
     return_source_documents=True
     )
-
     return qa_chain
