@@ -99,6 +99,7 @@ Context: {text[:800]}"""
     except:
         return "YES"
 
+<<<<<<< HEAD
 # ───────── BUILD CONTEXT STRING ─────────
 def get_context(docs):
     parts = []
@@ -110,3 +111,57 @@ def get_context(docs):
         parts.append(chunk)
         total += len(chunk)
     return "\n\n".join(parts)
+=======
+    2. If the user says:
+    - stop
+    - end
+    - quit
+    - exit
+    - stop asking questions
+
+    then stop asking questions politely.
+
+    3. If user chooses OTHER company,
+    ignore relevancy rule.
+
+    RELEVANCY RULE:
+
+    - Important topics for {company} are:
+      {topics}
+
+    - Check whether the user's question belongs to the important topics.
+
+    - If irrelevant, first say:
+      "This topic is irrelevant to the important topics of {company}."
+
+    - Then still answer the question.
+
+    INTERVIEW FLOW:
+
+    - Ask one interview question at a time.
+    - Evaluate user's answer.
+
+    Context:
+    {context}
+
+    User:
+    {question}
+
+    AI:
+    """
+
+    PROMPT = PromptTemplate(
+        template=prompt_template,
+        input_variables=["context", "question", "company", "topics"]
+    )
+
+    qa_chain = ConversationalRetrievalChain.from_llm(
+    llm=llm,
+    retriever=vectorstore.as_retriever(
+        search_kwargs={"k": 2}
+    ),
+    memory=memory,
+    combine_docs_chain_kwargs={"prompt": PROMPT},
+    return_source_documents=True
+    )
+    return qa_chain
